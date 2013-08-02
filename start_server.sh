@@ -1,8 +1,10 @@
 #!/bin/bash
+#
 # MineCraft server daemon starting and world backuping script
 # Version: 0.1
 # Author: Viacheslav Lotsmanov (unclechu) <lotsmanov89@gmail.com>
 # WWW: https://github.com/unclechu/minecraft-start-server
+# License: MIT
 #
 # The MIT License (MIT)
 #
@@ -84,7 +86,7 @@ backup_loop ()
         ls -X "$BACKUPS_DIR/" \
             | grep "^${LEVEL_NAME}_backup_.*\.tar\.gz$" \
             | head -n "-$[MAXIMUM_BACKUPS-1]" \
-            | xargs -I {} sh -c "echo 'Removing backup-file \"{}\"';\
+            | xargs -I {} sh -c "echo 'Removing backup-file \"{}\"'; \
                                  rm "$BACKUPS_DIR/{}""
     fi
 
