@@ -34,79 +34,221 @@ MAXIMUM_BACKUPS=48 # total backups
 BACKUP_INTERVAL=$[3600/2] # seconds
 BACKUPS_DIR="./backups"
 
-MINECRAFTD_PID="$$"
-BACKUPD_PID=0
-
 export GZIP=-9 # level of gzip compression
 
 if [ ! -f "./server.properties" ]; then
-    echo "File \"server.properties\" is not exists" 1>&2
-    echo "At first required initialize your world manually" 1>&2
-    echo "Try: java -jar minecraft_server.jar nogui" 1>&2
+    echo "[ FATAL ERROR ] File \"server.properties\" is not exists. " \
+         "At first required initialize your world manually. " \
+         "Try: \"java -jar minecraft_server.jar nogui\"" 1>&2
     exit 1
 fi
-LEVEL_NAME="`grep level-name "./server.properties" | sed 's/level-name=//'`"
+LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//'`"
 
 mkdir -p "$BACKUPS_DIR/"
 
-start_daemon ()
+SERVER_IN_PIPE="./.pipe_server_in"
+SERVER_OUT_PIPE="./.pipe_server_out"
+DAEMONS_PIDS_FILE="./.daemons_pids"
+
+terminate_subdaemon ()
 {
-    java -Xmx1024M -Xms1024M -jar minecraft_server.jar nogui
+    while read LINE; do
+        PID=`echo "$LINE" | cut -d ":" -f 3`
+        DESCRIPTION=`echo "$LINE" | cut -d ":" -f 2`
+
+        if [ -f "/proc/$PID/exe" ]; then
+            echo "Sending SIGTERM to subdaemon \"$DESCRIPTION\" (pid: $PID)..."
+            kill -TERM "$PID" > /dev/null
+            if [ "$?" -eq "0" ]; then
+                echo "Subdaemon \"$DESCRIPTION\" (pid: $PID) is terminated"
+            else
+                echo "[ ERROR ] Terminating subdaemon \"$DESCRIPTION\" (pid: $PID) error" 1>&2
+            fi
+        else
+            echo "[ WARNING ] Subdaemon \"$DESCRIPTION\" (pid: $PID) is not started" 1>&2
+        fi
+    done
+}
+
+subdaemon_pid_by_id ()
+{
+    cat "$DAEMONS_PIDS_FILE" | grep "$1" | cut -d ':' -f 3
+}
+
+terminate_subdaemon_id ()
+{
+    echo "Terminating daemon by id \"$1\"..."
+    if [ "`cat "$DAEMONS_PIDS_FILE" | grep "$1" | wc -l`" -eq "0" ]; then
+        echo "[ ERROR ] Daemon by id \"$1\" not found" 1>&2
+    else
+        cat "$DAEMONS_PIDS_FILE" | grep "$1" | terminate_subdaemon
+    fi
+}
+
+server_daemon ()
+{
+    cat "$SERVER_IN_PIPE" \
+        | java -Xmx1024M -Xms1024M -jar minecraft_server.jar nogui \
+        1> "$SERVER_OUT_PIPE" 2>&1 &
+
+    JAVASERVER="$!"
+    echo "JAVASERVER:MineCraft server:$JAVASERVER" >> "$DAEMONS_PIDS_FILE"
+
+    while [ -f "/proc/$JAVASERVER/exe" ]; do
+        sleep 1
+    done
+
+    echo "Minecraft server is terminated"
+
+    terminate_subdaemon_id GENERALAPP
 }
 
 exit_handler ()
 {
-    echo "Exit handler..."
-    if [ "$BACKUPD_PID" -ne "0" ]; then
-        echo "Send SIGTERM to backuping daemon pid: \"$BACKUPD_PID\""
-        kill -TERM "$BACKUPD_PID"
-        if [ "$?" -eq "0" ]; then
-            echo "Backuping daemon was terminated"
-        else
-            echo "Terminating backuping daemon error" 1>&2
-            exit 1
-        fi
+    echo "Exit handler triggered..."
+
+    echo "Terminating subdaemons..."
+    cat "$DAEMONS_PIDS_FILE" \
+        | grep -v GENERALAPP \
+        | grep -v MCSERVERD \
+        | grep -v JAVASERVER \
+        | grep -v SUBDAEMONS \
+        | terminate_subdaemon
+
+    MCSERVERD="`subdaemon_pid_by_id MCSERVERD`"
+    if [ -f "/proc/$MCSERVERD/exe" ]; then
+        echo "/say Stopping server..." > "$SERVER_IN_PIPE"
+        sleep 3
+        echo "/stop" > "$SERVER_IN_PIPE"
+
+        while [ -f "/proc/$MCSERVERD/exe" ]; do
+            sleep 1
+        done
     fi
+
+    echo "Removing pipe file \"$SERVER_IN_PIPE\"..."
+    rm "$SERVER_IN_PIPE"
+
+    echo "Removing pipe file \"$SERVER_OUT_PIPE\"..."
+    rm "$SERVER_OUT_PIPE"
+
+    echo "Removing temp file \"$DAEMONS_PIDS_FILE\"..."
+    rm "$DAEMONS_PIDS_FILE"
 }
 
-backup_loop ()
+server_logging ()
 {
-    echo "Creating backup of the world"
+    cat "$SERVER_OUT_PIPE"
+    echo "Logging daemon terminated"
+}
 
-    if [ ! -f "/proc/$MINECRAFTD_PID/exe" ]; then
-        echo "General daemon fallen, stopping backuping daemon" 1>&2
-        exit 1
-    fi
+removing_old_backups ()
+{
+    echo "Search of old backups..."
 
-    echo "Removing old backups"
-    BACKUPS_COUNT=`ls -X "$BACKUPS_DIR/" \
+    BACKUPS_COUNT="`ls -X "$BACKUPS_DIR/" \
         | grep "^${LEVEL_NAME}_backup_.*\.tar\.gz$" \
-        | wc -l`
+        | wc -l`"
+
     if [ "$BACKUPS_COUNT" -ge "$MAXIMUM_BACKUPS" ]; then
+        echo "Old backups found, removing..."
         ls -X "$BACKUPS_DIR/" \
             | grep "^${LEVEL_NAME}_backup_.*\.tar\.gz$" \
             | head -n "-$[MAXIMUM_BACKUPS-1]" \
-            | xargs -I {} sh -c "echo 'Removing backup-file \"{}\"'; \
+            | xargs -I {} sh -c "echo 'Removing backup-file \"{}\"...'; \
                                  rm "$BACKUPS_DIR/{}""
     fi
+}
 
-    tar -czf \
-        "$BACKUPS_DIR/${LEVEL_NAME}_backup_`date '+%F-%H-%M-%S'`.tar.gz" \
-        "$LEVEL_NAME/"
-    if [ "$?" -ne "0" ]; then
-        echo "Creating backup error" 1>&2
+create_backup ()
+{
+    echo "Creating world backup..."
+
+    BACKUP_PATH="$BACKUPS_DIR/${LEVEL_NAME}_backup_"$1".tar.gz"
+
+    tar -czf "$BACKUP_PATH" "$LEVEL_NAME/"
+
+    if [ "$?" -eq "0" ]; then
+        echo "World backup is created: \"$BACKUP_PATH\""
+    else
+        echo "[ ERROR ] Backup is not created, trying again" 1>&2
+        sleep 1
+        create_backup "$1"
     fi
+}
+
+backuping ()
+{
+    removing_old_backups
+
+    create_backup "`date '+%F-%H-%M-%S'`"
 
     echo "Next backup after $BACKUP_INTERVAL seconds"
     sleep "$BACKUP_INTERVAL"
-    backup_loop
+
+    backuping
 }
 
-backup_loop &
-BACKUPD_PID="$!"
+start_subdaemons ()
+{
+    echo "Waiting for MineCraft server ready..."
 
-trap 'exit_handler' EXIT
+    cat "$SERVER_OUT_PIPE" | while read LINE; do
+        echo "$LINE"
+        echo "$LINE" | grep "\[INFO\] Done" > /dev/null
+        if [ "$?" -eq 0 ]; then
+            echo "MineCraft server is ready!"
 
-start_daemon
+            echo "Starting backuping daemon..."
+            backuping &
+            echo "BACKUPING:Backuping daemon:$!" >> "$DAEMONS_PIDS_FILE"
+
+            echo "Starting MineCraft server logging daemon..."
+            server_logging &
+            echo "LOGGING:MineCraft server logging daemon:$!" >> "$DAEMONS_PIDS_FILE"
+
+            break
+        fi
+    done
+}
+
+if [ -f "$DAEMONS_PIDS_FILE" ]; then
+    echo "[ FATAL ERROR ] Found subdaemons pids file \"$DAEMONS_PIDS_FILE\"," \
+         "server already started?" 1>&2
+    exit 1
+fi
+if [[ -p "$SERVER_IN_PIPE" || -f "$SERVER_IN_PIPE" \
+|| -p "$SERVER_OUT_PIPE" || -f "$SERVER_OUT_PIPE" ]]; then
+    ERR_PIPE=""
+    if [[ -p "$SERVER_IN_PIPE" || -f "$SERVER_IN_PIPE" ]]; then
+        ERR_PIPE="$SERVER_IN_PIPE"
+    elif [[ -p "$SERVER_OUT_PIPE" || -f "$SERVER_OUT_PIPE" ]]; then
+        ERR_PIPE="$SERVER_OUT_PIPE"
+    fi
+    echo "[ FATAL ERROR ] Found old named pipe \"$ERR_PIPE\"," \
+         "server already started?" 1>&2
+    exit 1
+fi
+mkfifo "$SERVER_IN_PIPE" && exec 3<> "$SERVER_IN_PIPE"
+mkfifo "$SERVER_OUT_PIPE"
+touch "$DAEMONS_PIDS_FILE"
+
+trap exit_handler EXIT
+
+echo "World name is \"$LEVEL_NAME\""
+
+echo "GENERALAPP:General application:$$" >> "$DAEMONS_PIDS_FILE"
+
+echo "Starting subdaemons..."
+start_subdaemons &
+echo "SUBDAEMONS:Subdaemons caller:$!" >> "$DAEMONS_PIDS_FILE"
+
+echo "Starting MineCraft server daemon..."
+server_daemon &
+echo "MCSERVERD:MineCraft server daemon:$!" >> "$DAEMONS_PIDS_FILE"
+
+while read CMD; do
+    echo "$CMD" > "$SERVER_IN_PIPE"
+done
 
 # vim:set ts=4 sw=4 expandtab:
