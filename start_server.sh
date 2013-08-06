@@ -164,16 +164,16 @@ create_backup ()
 {
     echo "Creating world backup..."
 
-    BACKUP_PATH="$BACKUPS_DIR/${LEVEL_NAME}_backup_"$1".tar.gz"
+    BACKUP_PATH="$BACKUPS_DIR/${LEVEL_NAME}_backup_`date '+%F-%H-%M-%S'`.tar.gz"
 
     tar -czf "$BACKUP_PATH" "$LEVEL_NAME/"
 
     if [ "$?" -eq "0" ]; then
         echo "World backup is created: \"$BACKUP_PATH\""
     else
-        echo "[ ERROR ] Backup is not created, trying again" 1>&2
+        echo "[ ERROR ] Creating backup error, trying again" 1>&2
         sleep 1
-        create_backup "$1"
+        create_backup
     fi
 }
 
@@ -181,7 +181,7 @@ backuping ()
 {
     removing_old_backups
 
-    create_backup "`date '+%F-%H-%M-%S'`"
+    create_backup
 
     echo "Next backup after $BACKUP_INTERVAL seconds"
     sleep "$BACKUP_INTERVAL"
