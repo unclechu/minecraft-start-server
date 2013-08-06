@@ -58,7 +58,13 @@ if [ ! -f "./server.properties" ]; then
          "Try: \"java -jar minecraft_server.jar nogui\"" 1>&2
     exit 1
 fi
-LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//'`"
+LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//' \
+            | sed 's/^\s\+//g' | sed 's/\s\+$//g'`"
+if [ "$LEVEL_NAME" == "" ]; then
+    echo "[ FATAL ERROR ] Empty level name." \
+         "Check your server properties file: \"server.properties\"" 1>&2
+    exit 1
+fi
 
 mkdir -p "$BACKUPS_DIR/"
 
