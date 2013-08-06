@@ -30,11 +30,27 @@
 
 cd "`dirname "$0"`"
 
-MAXIMUM_BACKUPS=48 # total backups
-BACKUP_INTERVAL=$[3600/2] # seconds
-BACKUPS_DIR="./backups"
+CONFIG_FILE="./start_server.cfg"
 
-export GZIP=-9 # level of gzip compression
+# Default config values
+MAXIMUM_BACKUPS=48 # maximum backups count
+BACKUP_INTERVAL=$[3600/2] # in seconds
+BACKUPS_DIR="./backups" # path to backups dir
+GZIP_LEVEL="-9" # level of compression, "-9" is best compression
+SERVER_IN_PIPE="./.pipe_server_in"
+SERVER_OUT_PIPE="./.pipe_server_out"
+DAEMONS_PIDS_FILE="./.daemons_pids"
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "[ FATAL ERROR ] Config file \"$CONFIG_FILE\" not found." \
+         "Copy example of config \"start_server.cfg.example\"" \
+         "to your work dir as \"$CONFIG_FILE\"" 1>&2
+    exit 1
+else
+    source "$CONFIG_FILE"
+fi
+
+export GZIP="$GZIP_LEVEL" # level of gzip compression
 
 if [ ! -f "./server.properties" ]; then
     echo "[ FATAL ERROR ] File \"server.properties\" is not exists. " \
@@ -45,10 +61,6 @@ fi
 LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//'`"
 
 mkdir -p "$BACKUPS_DIR/"
-
-SERVER_IN_PIPE="./.pipe_server_in"
-SERVER_OUT_PIPE="./.pipe_server_out"
-DAEMONS_PIDS_FILE="./.daemons_pids"
 
 terminate_subdaemon ()
 {

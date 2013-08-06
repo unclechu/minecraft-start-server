@@ -1,0 +1,5 @@
+#!/bin/bash
+# See start_server.sh "default config values" for more values
+MAXIMUM_BACKUPS=48 # maximum backups count
+BACKUP_INTERVAL=$[3600/2] # in seconds
+BACKUPS_DIR="./backups" # path to backups dir
