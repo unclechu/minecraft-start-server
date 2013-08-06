@@ -231,13 +231,42 @@ create_backup ()
     fi
 }
 
+time_text ()
+{
+    TIME_TEXT=""
+
+    if [ "$1" -ge "3600" ]; then
+        H="$[ $1 / 3600 ]"
+        M="$[ $[$1-$[$H*3600]] / 60 ]"
+        S="$[ $1 - $[$[$H*3600]+$[$M*60]] ]"
+        TIME_TEXT="$H hours"
+        if [ "$M" -gt "0" ]; then
+            TIME_TEXT="$TIME_TEXT $M minutes"
+        fi
+        if [ "$S" -gt "0" ]; then
+            TIME_TEXT="$TIME_TEXT $S seconds"
+        fi
+    elif [ "$1" -ge "60" ]; then
+        M="$[ $1 / 60 ]"
+        S="$[ $1 - $[$M*60] ]"
+        TIME_TEXT="$M minutes"
+        if [ "$S" -gt "0" ]; then
+            TIME_TEXT="$TIME_TEXT $S seconds"
+        fi
+    else
+        TIME_TEXT="$1 seconds"
+    fi
+
+    echo $TIME_TEXT
+}
+
 backuping ()
 {
     removing_old_backups
 
     create_backup
 
-    echo "Next backup after $BACKUP_INTERVAL seconds"
+    echo "Next backup after `time_text "$BACKUP_INTERVAL"`"
     sleep "$BACKUP_INTERVAL"
 
     backuping
