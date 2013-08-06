@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # MineCraft server daemon starting and world backuping script
-# Version: 0.2
+# Version: 0.3
 # Author: Viacheslav Lotsmanov (unclechu) <lotsmanov89@gmail.com>
 # WWW: https://github.com/unclechu/minecraft-start-server
 # License: MIT
