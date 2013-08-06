@@ -29,6 +29,7 @@
 # THE SOFTWARE.
 
 cd "`dirname "$0"`"
+THIS_FILENAME="`basename "$0"`"
 
 CONFIG_FILE="./start_server.cfg"
 
@@ -41,13 +42,47 @@ SERVER_IN_PIPE="./.pipe_server_in"
 SERVER_OUT_PIPE="./.pipe_server_out"
 DAEMONS_PIDS_FILE="./.daemons_pids"
 
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "[ FATAL ERROR ] Config file \"$CONFIG_FILE\" not found." \
-         "Copy example of config \"start_server.cfg.example\"" \
-         "to your work dir as \"$CONFIG_FILE\"" 1>&2
-    exit 1
-else
-    source "$CONFIG_FILE"
+usage ()
+{
+cat << EOF
+Usage: $THIS_FILENAME
+
+`sed -n '3,7p' < "$THIS_FILENAME" | sed 's/^# //g'`
+
+OPTIONS:
+  -h   Show this message
+  -d   Start with default configuration
+EOF
+}
+
+DEFAULT_CONFIGURATION=0
+while getopts "h:d" OPTION; do
+    case "$OPTION" in
+        h)
+            usage
+            exit 0
+            ;;
+        d)
+            DEFAULT_CONFIGURATION=1
+            ;;
+        ?)
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+if [ "$DEFAULT_CONFIGURATION" -eq "0" ]; then
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "[ FATAL ERROR ] Config file \"$CONFIG_FILE\" not found." \
+             "Copy example of config \"start_server.cfg.example\"" \
+             "to your work dir as \"$CONFIG_FILE\"" \
+             "or run this script with -d flag" \
+             "for start with default configuration." 1>&2
+        exit 1
+    else
+        source "$CONFIG_FILE"
+    fi
 fi
 
 export GZIP="$GZIP_LEVEL" # level of gzip compression
