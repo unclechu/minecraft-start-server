@@ -33,10 +33,25 @@ THIS_FILENAME="`basename "$0"`"
 
 CONFIG_FILE="./start_server.cfg"
 
+if [ ! -f "./server.properties" ]; then
+    echo "[ FATAL ERROR ] File \"server.properties\" is not exists. " \
+         "At first required initialize your world manually. " \
+         "Try: \"java -jar minecraft_server.jar nogui\"" 1>&2
+    exit 1
+fi
+LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//' \
+            | sed 's/^\s\+//g' | sed 's/\s\+$//g'`"
+if [ "$LEVEL_NAME" == "" ]; then
+    echo "[ FATAL ERROR ] Empty level name." \
+         "Check your server properties file: \"server.properties\"" 1>&2
+    exit 1
+fi
+
 # Default config values
 MAXIMUM_BACKUPS=48 # maximum backups count
 BACKUP_INTERVAL=$[3600/2] # in seconds
 BACKUPS_DIR="./backups" # path to backups dir
+FILES_TO_BACKUP="$LEVEL_NAME/ server.properties"
 GZIP_LEVEL="-9" # level of compression, "-9" is best compression
 SERVER_IN_PIPE="./.pipe_server_in"
 SERVER_OUT_PIPE="./.pipe_server_out"
@@ -86,20 +101,6 @@ if [ "$DEFAULT_CONFIGURATION" -eq "0" ]; then
 fi
 
 export GZIP="$GZIP_LEVEL" # level of gzip compression
-
-if [ ! -f "./server.properties" ]; then
-    echo "[ FATAL ERROR ] File \"server.properties\" is not exists. " \
-         "At first required initialize your world manually. " \
-         "Try: \"java -jar minecraft_server.jar nogui\"" 1>&2
-    exit 1
-fi
-LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//' \
-            | sed 's/^\s\+//g' | sed 's/\s\+$//g'`"
-if [ "$LEVEL_NAME" == "" ]; then
-    echo "[ FATAL ERROR ] Empty level name." \
-         "Check your server properties file: \"server.properties\"" 1>&2
-    exit 1
-fi
 
 mkdir -p "$BACKUPS_DIR/"
 
@@ -219,7 +220,7 @@ create_backup ()
 
     BACKUP_PATH="$BACKUPS_DIR/${LEVEL_NAME}_backup_`date '+%F-%H-%M-%S'`.tar.gz"
 
-    tar -czf "$BACKUP_PATH" "$LEVEL_NAME/"
+    tar -czf "$BACKUP_PATH" $FILES_TO_BACKUP
 
     if [ "$?" -eq "0" ]; then
         echo "World backup is created: \"$BACKUP_PATH\""
