@@ -55,7 +55,7 @@ FILES_TO_BACKUP="$LEVEL_NAME/ server.properties"
 GZIP_LEVEL="-9" # level of compression, "-9" is best compression
 SERVER_IN_PIPE="./.pipe_server_in"
 SERVER_OUT_PIPE="./.pipe_server_out"
-DAEMONS_PIDS_FILE="./.daemons_pids"
+SUBPROC_PIDS_FILE="./.subproc_pids"
 
 usage ()
 {
@@ -104,38 +104,38 @@ export GZIP="$GZIP_LEVEL" # level of gzip compression
 
 mkdir -p "$BACKUPS_DIR/"
 
-terminate_subdaemon ()
+terminate ()
 {
     while read LINE; do
         PID=`echo "$LINE" | cut -d ":" -f 3`
         DESCRIPTION=`echo "$LINE" | cut -d ":" -f 2`
 
         if [ -f "/proc/$PID/exe" ]; then
-            echo "Sending SIGTERM to subdaemon \"$DESCRIPTION\" (pid: $PID)..."
+            echo "Sending SIGTERM to process \"$DESCRIPTION\" (pid: $PID)..."
             kill -TERM "$PID" > /dev/null
             if [ "$?" -eq "0" ]; then
-                echo "Subdaemon \"$DESCRIPTION\" (pid: $PID) is terminated"
+                echo "Process \"$DESCRIPTION\" (pid: $PID) is terminated"
             else
-                echo "[ ERROR ] Terminating subdaemon \"$DESCRIPTION\" (pid: $PID) error" 1>&2
+                echo "[ ERROR ] Terminating process \"$DESCRIPTION\" (pid: $PID) error" 1>&2
             fi
         else
-            echo "[ WARNING ] Subdaemon \"$DESCRIPTION\" (pid: $PID) is not started" 1>&2
+            echo "[ WARNING ] Process \"$DESCRIPTION\" (pid: $PID) is not started" 1>&2
         fi
     done
 }
 
-subdaemon_pid_by_id ()
+pid_by_id ()
 {
-    cat "$DAEMONS_PIDS_FILE" | grep "$1" | cut -d ':' -f 3
+    cat "$SUBPROC_PIDS_FILE" | grep "$1" | cut -d ':' -f 3
 }
 
-terminate_subdaemon_id ()
+terminate_id ()
 {
-    echo "Terminating daemon by id \"$1\"..."
-    if [ "`cat "$DAEMONS_PIDS_FILE" | grep "$1" | wc -l`" -eq "0" ]; then
-        echo "[ ERROR ] Daemon by id \"$1\" not found" 1>&2
+    echo "Terminating process by id \"$1\"..."
+    if [ "`cat "$SUBPROC_PIDS_FILE" | grep "$1" | wc -l`" -eq "0" ]; then
+        echo "[ ERROR ] Process by id \"$1\" not found" 1>&2
     else
-        cat "$DAEMONS_PIDS_FILE" | grep "$1" | terminate_subdaemon
+        cat "$SUBPROC_PIDS_FILE" | grep "$1" | terminate
     fi
 }
 
@@ -146,7 +146,7 @@ server_daemon ()
         1> "$SERVER_OUT_PIPE" 2>&1 &
 
     JAVASERVER="$!"
-    echo "JAVASERVER:MineCraft server:$JAVASERVER" >> "$DAEMONS_PIDS_FILE"
+    echo "JAVASERVER:MineCraft server:$JAVASERVER" >> "$SUBPROC_PIDS_FILE"
 
     while [ -f "/proc/$JAVASERVER/exe" ]; do
         sleep 1
@@ -154,22 +154,22 @@ server_daemon ()
 
     echo "Minecraft server is terminated"
 
-    terminate_subdaemon_id GENERALAPP
+    terminate_id GENERALAPP
 }
 
 exit_handler ()
 {
     echo "Exit handler triggered..."
 
-    echo "Terminating subdaemons..."
-    cat "$DAEMONS_PIDS_FILE" \
+    echo "Terminating subprocesses..."
+    cat "$SUBPROC_PIDS_FILE" \
         | grep -v GENERALAPP \
         | grep -v MCSERVERD \
         | grep -v JAVASERVER \
         | grep -v SUBDAEMONS \
-        | terminate_subdaemon
+        | terminate
 
-    MCSERVERD="`subdaemon_pid_by_id MCSERVERD`"
+    MCSERVERD="`pid_by_id MCSERVERD`"
     if [ -f "/proc/$MCSERVERD/exe" ]; then
         echo "/say Stopping server..." > "$SERVER_IN_PIPE"
         sleep 3
@@ -186,8 +186,8 @@ exit_handler ()
     echo "Removing pipe file \"$SERVER_OUT_PIPE\"..."
     rm "$SERVER_OUT_PIPE"
 
-    echo "Removing temp file \"$DAEMONS_PIDS_FILE\"..."
-    rm "$DAEMONS_PIDS_FILE"
+    echo "Removing temp file \"$SUBPROC_PIDS_FILE\"..."
+    rm "$SUBPROC_PIDS_FILE"
 }
 
 server_logging ()
@@ -272,7 +272,7 @@ backuping ()
     backuping
 }
 
-start_subdaemons ()
+start_subprocesses ()
 {
     echo "Waiting for MineCraft server ready..."
 
@@ -284,19 +284,19 @@ start_subdaemons ()
 
             echo "Starting backuping daemon..."
             backuping &
-            echo "BACKUPING:Backuping daemon:$!" >> "$DAEMONS_PIDS_FILE"
+            echo "BACKUPING:Backuping daemon:$!" >> "$SUBPROC_PIDS_FILE"
 
             echo "Starting MineCraft server logging daemon..."
             server_logging &
-            echo "LOGGING:MineCraft server logging daemon:$!" >> "$DAEMONS_PIDS_FILE"
+            echo "LOGGING:MineCraft server logging daemon:$!" >> "$SUBPROC_PIDS_FILE"
 
             break
         fi
     done
 }
 
-if [ -f "$DAEMONS_PIDS_FILE" ]; then
-    echo "[ FATAL ERROR ] Found subdaemons pids file \"$DAEMONS_PIDS_FILE\"," \
+if [ -f "$SUBPROC_PIDS_FILE" ]; then
+    echo "[ FATAL ERROR ] Found subprocesses pids file \"$SUBPROC_PIDS_FILE\"," \
          "server already started?" 1>&2
     exit 1
 fi
@@ -314,21 +314,21 @@ if [[ -p "$SERVER_IN_PIPE" || -f "$SERVER_IN_PIPE" \
 fi
 mkfifo "$SERVER_IN_PIPE" && exec 3<> "$SERVER_IN_PIPE"
 mkfifo "$SERVER_OUT_PIPE"
-touch "$DAEMONS_PIDS_FILE"
+touch "$SUBPROC_PIDS_FILE"
 
 trap exit_handler EXIT
 
 echo "World name is \"$LEVEL_NAME\""
 
-echo "GENERALAPP:General application:$$" >> "$DAEMONS_PIDS_FILE"
+echo "GENERALAPP:General application:$$" >> "$SUBPROC_PIDS_FILE"
 
-echo "Starting subdaemons..."
-start_subdaemons &
-echo "SUBDAEMONS:Subdaemons caller:$!" >> "$DAEMONS_PIDS_FILE"
+echo "Starting subprocesses..."
+start_subprocesses &
+echo "SUBDAEMONS:Subprocesses starter:$!" >> "$SUBPROC_PIDS_FILE"
 
 echo "Starting MineCraft server daemon..."
 server_daemon &
-echo "MCSERVERD:MineCraft server daemon:$!" >> "$DAEMONS_PIDS_FILE"
+echo "MCSERVERD:MineCraft server daemon:$!" >> "$SUBPROC_PIDS_FILE"
 
 while read CMD; do
     echo "$CMD" > "$SERVER_IN_PIPE"
