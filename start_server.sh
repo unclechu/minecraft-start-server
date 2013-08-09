@@ -162,11 +162,15 @@ exit_handler ()
     echo "Exit handler triggered..."
 
     echo "Terminating subprocesses..."
+
+    # if application was terminated before MC server ready
+    terminate_id SUBPROC
+
     cat "$SUBPROC_PIDS_FILE" \
         | grep -v GENERALAPP \
         | grep -v MCSERVERD \
         | grep -v JAVASERVER \
-        | grep -v SUBDAEMONS \
+        | grep -v SUBPROC \
         | terminate
 
     MCSERVERD="`pid_by_id MCSERVERD`"
@@ -324,7 +328,7 @@ echo "GENERALAPP:General application:$$" >> "$SUBPROC_PIDS_FILE"
 
 echo "Starting subprocesses..."
 start_subprocesses &
-echo "SUBDAEMONS:Subprocesses starter:$!" >> "$SUBPROC_PIDS_FILE"
+echo "SUBPROC:Subprocesses starter:$!" >> "$SUBPROC_PIDS_FILE"
 
 echo "Starting MineCraft server daemon..."
 server_daemon &
