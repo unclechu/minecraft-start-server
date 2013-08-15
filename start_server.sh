@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # MineCraft server daemon starting and world backuping script
-# Version: 0.3
+# Version: 0.3.1
 # Author: Viacheslav Lotsmanov (unclechu) <lotsmanov89@gmail.com>
 # WWW: https://github.com/unclechu/minecraft-start-server
 # License: MIT
@@ -30,34 +30,6 @@
 
 cd "`dirname "$0"`"
 THIS_FILENAME="`basename "$0"`"
-
-CONFIG_FILE="./start_server.cfg"
-
-if [ ! -f "./server.properties" ]; then
-    echo "[ FATAL ERROR ] File \"server.properties\" is not exists. " \
-         "At first required initialize your world manually. " \
-         "Try: \"java -jar minecraft_server.jar nogui\"" 1>&2
-    exit 1
-fi
-LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//' \
-            | sed 's/^\s\+//g' | sed 's/\s\+$//g'`"
-if [ "$LEVEL_NAME" == "" ]; then
-    echo "[ FATAL ERROR ] Empty level name." \
-         "Check your server properties file: \"server.properties\"" 1>&2
-    exit 1
-fi
-
-# Default config values
-MAXIMUM_BACKUPS=48 # maximum backups count
-BACKUP_INTERVAL=$[3600/2] # in seconds
-BACKUPS_DIR="./backups" # path to backups dir
-FILES_TO_BACKUP="$LEVEL_NAME/ server.properties"
-GZIP_LEVEL="-9" # level of compression, "-9" is best compression
-TERM_TIMEOUT=5 # seconds of process terminating timeout
-SERVER_IN_PIPE="./.pipe_server_in"
-SERVER_OUT_PIPE="./.pipe_server_out"
-SUBPROC_PIDS_FILE="./.subproc_pids"
-APP_EXITING_FILE="./.app_exiting"
 
 usage ()
 {
@@ -88,6 +60,34 @@ while getopts "h:d" OPTION; do
             ;;
     esac
 done
+
+CONFIG_FILE="./start_server.cfg"
+
+if [ ! -f "./server.properties" ]; then
+    echo "[ FATAL ERROR ] File \"server.properties\" is not exists. " \
+         "At first required initialize your world manually. " \
+         "Try: \"java -jar minecraft_server.jar nogui\"" 1>&2
+    exit 1
+fi
+LEVEL_NAME="`grep "level-name=" "./server.properties" | sed 's/level-name=//' \
+            | sed 's/^\s\+//g' | sed 's/\s\+$//g'`"
+if [ "$LEVEL_NAME" == "" ]; then
+    echo "[ FATAL ERROR ] Empty level name." \
+         "Check your server properties file: \"server.properties\"" 1>&2
+    exit 1
+fi
+
+# Default config values
+MAXIMUM_BACKUPS=48 # maximum backups count
+BACKUP_INTERVAL=$[3600/2] # in seconds
+BACKUPS_DIR="./backups" # path to backups dir
+FILES_TO_BACKUP="$LEVEL_NAME/ server.properties"
+GZIP_LEVEL="-9" # level of compression, "-9" is best compression
+TERM_TIMEOUT=5 # seconds of process terminating timeout
+SERVER_IN_PIPE="./.pipe_server_in"
+SERVER_OUT_PIPE="./.pipe_server_out"
+SUBPROC_PIDS_FILE="./.subproc_pids"
+APP_EXITING_FILE="./.app_exiting"
 
 if [ "$DEFAULT_CONFIGURATION" -eq "0" ]; then
     if [ ! -f "$CONFIG_FILE" ]; then
@@ -256,7 +256,7 @@ exit_handler ()
     echo "Removing pipe file \"$SERVER_OUT_PIPE\"..."
     rm "$SERVER_OUT_PIPE"
 
-    # profilactic
+    echo "Prophylactic terminating logging daemon..."
     terminate_id LOGGING
 
     echo "Removing temp file \"$SUBPROC_PIDS_FILE\"..."
