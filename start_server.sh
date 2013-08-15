@@ -53,9 +53,11 @@ BACKUP_INTERVAL=$[3600/2] # in seconds
 BACKUPS_DIR="./backups" # path to backups dir
 FILES_TO_BACKUP="$LEVEL_NAME/ server.properties"
 GZIP_LEVEL="-9" # level of compression, "-9" is best compression
+TERM_TIMEOUT=5 # seconds of process terminating timeout
 SERVER_IN_PIPE="./.pipe_server_in"
 SERVER_OUT_PIPE="./.pipe_server_out"
 SUBPROC_PIDS_FILE="./.subproc_pids"
+APP_EXITING_FILE="./.app_exiting"
 
 usage ()
 {
@@ -104,23 +106,81 @@ export GZIP="$GZIP_LEVEL" # level of gzip compression
 
 mkdir -p "$BACKUPS_DIR/"
 
+# Send SIGTERM or SIGKILL to process and wait when process terminate
+# Args:
+#   $1 - PID
+#   $2 - "TERM" or "KILL"
+send_kill_signal ()
+{
+    PID="$1"
+    SIG="$2"
+    DESCRIPTION="$3"
+
+    if [ "$PID" == "" ]; then
+        echo "[ FATAL ERROR ] \"send_kill_signal\": PID is empty" 1>&2
+        exit 1
+    fi
+
+    if [ "$SIG" == "KILL" ]; then
+        MSG_STATUS="killing"
+        MSG_STATUS_PAST_TENSE="killed"
+    else
+        SIG="TERM"
+        MSG_STATUS="terminating"
+        MSG_STATUS_PAST_TENSE="terminated"
+    fi
+
+    if [ "$DESCRIPTION" != "" ]; then
+        DESCRIPTION=" \"$DESCRIPTION\""
+    fi
+
+    if [ -f "/proc/$PID/exe" ]; then
+        echo "Sending SIG$SIG to process$DESCRIPTION (pid: $PID)..."
+        kill -"$SIG" "$PID" > /dev/null
+        if [ "$?" -eq "0" ]; then
+            echo "Waiting for $MSG_STATUS process$DESCRIPTION (pid: $PID)..."
+            I=0
+            while [ -f "/proc/$PID/exe" ]; do
+                if [ "$I" -ge "$TERM_TIMEOUT" ]; then
+                    echo "[ ERROR ] Timeout of $MSG_STATUS process$DESCRIPTION (pid: $PID)" 1>&2
+                    if [ "$SIG" != "KILL" ]; then
+                        I=-1
+                    else
+                        I=-2
+                    fi
+                    break
+                fi
+                sleep 1
+                I="$[$I+1]"
+            done
+            if [ "$I" -eq "-1" ]; then
+                send_kill_signal "$PID" KILL "$3"
+                exit "$?"
+            elif [ "$I" -eq "-2" ]; then
+                echo "[ ERROR ] Killing process$DESCRIPTION error (pid: $PID)" 1>&2
+                exit 1
+            else
+                echo "Process$DESCRIPTION (pid: $PID) is $MSG_STATUS_PAST_TENSE"
+                exit 0
+            fi
+        else
+            echo "[ ERROR ] ${MSG_STATUS^} process$DESCRIPTION (pid: $PID) error." \
+                 "\"kill\" command was terminated with exit code \"$?\"." 1>&2
+            exit 1
+        fi
+    else
+        echo "[ WARNING ] Hasn't process$DESCRIPTION (pid: $PID)" 1>&2
+        exit 0
+    fi
+}
+
 terminate ()
 {
     while read LINE; do
         PID=`echo "$LINE" | cut -d ":" -f 3`
         DESCRIPTION=`echo "$LINE" | cut -d ":" -f 2`
 
-        if [ -f "/proc/$PID/exe" ]; then
-            echo "Sending SIGTERM to process \"$DESCRIPTION\" (pid: $PID)..."
-            kill -TERM "$PID" > /dev/null
-            if [ "$?" -eq "0" ]; then
-                echo "Process \"$DESCRIPTION\" (pid: $PID) is terminated"
-            else
-                echo "[ ERROR ] Terminating process \"$DESCRIPTION\" (pid: $PID) error" 1>&2
-            fi
-        else
-            echo "[ WARNING ] Process \"$DESCRIPTION\" (pid: $PID) is not started" 1>&2
-        fi
+        send_kill_signal "$PID" TERM "$DESCRIPTION"
     done
 }
 
@@ -133,7 +193,7 @@ terminate_id ()
 {
     echo "Terminating process by id \"$1\"..."
     if [ "`cat "$SUBPROC_PIDS_FILE" | grep "$1" | wc -l`" -eq "0" ]; then
-        echo "[ ERROR ] Process by id \"$1\" not found" 1>&2
+        echo "[ WARNING ] Process by id \"$1\" not found" 1>&2
     else
         cat "$SUBPROC_PIDS_FILE" | grep "$1" | terminate
     fi
@@ -154,12 +214,17 @@ server_daemon ()
 
     echo "Minecraft server is terminated"
 
-    terminate_id GENERALAPP
+    if [ ! -f "$APP_EXITING_FILE" ]; then
+        terminate_id GENERALAPP &
+    fi
 }
 
 exit_handler ()
 {
     echo "Exit handler triggered..."
+
+    echo "Creating exiting flag file \"$APP_EXITING_FILE\"..."
+    touch "$APP_EXITING_FILE"
 
     echo "Terminating subprocesses..."
 
@@ -171,6 +236,7 @@ exit_handler ()
         | grep -v MCSERVERD \
         | grep -v JAVASERVER \
         | grep -v SUBPROC \
+        | grep -v LOGGING \
         | terminate
 
     MCSERVERD="`pid_by_id MCSERVERD`"
@@ -190,8 +256,14 @@ exit_handler ()
     echo "Removing pipe file \"$SERVER_OUT_PIPE\"..."
     rm "$SERVER_OUT_PIPE"
 
+    # profilactic
+    terminate_id LOGGING
+
     echo "Removing temp file \"$SUBPROC_PIDS_FILE\"..."
     rm "$SUBPROC_PIDS_FILE"
+
+    echo "Removing exiting flag file \"$APP_EXITING_FILE\"..."
+    rm "$APP_EXITING_FILE"
 }
 
 server_logging ()
@@ -282,6 +354,11 @@ start_subprocesses ()
 
     cat "$SERVER_OUT_PIPE" | while read LINE; do
         echo "$LINE"
+        if [ -f "$APP_EXITING_FILE" ]; then
+            server_logging &
+            echo "LOGGING:MineCraft server logging daemon:$!" >> "$SUBPROC_PIDS_FILE"
+            exit 0
+        fi
         echo "$LINE" | grep "\[INFO\] Done" > /dev/null
         if [ "$?" -eq 0 ]; then
             echo "MineCraft server is ready!"
@@ -313,6 +390,11 @@ if [[ -p "$SERVER_IN_PIPE" || -f "$SERVER_IN_PIPE" \
         ERR_PIPE="$SERVER_OUT_PIPE"
     fi
     echo "[ FATAL ERROR ] Found old named pipe \"$ERR_PIPE\"," \
+         "server already started?" 1>&2
+    exit 1
+fi
+if [ -f "$APP_EXITING_FILE" ]; then
+    echo "[ FATAL ERROR ] Found old exiting flag file \"$APP_EXITING_FILE\", " \
          "server already started?" 1>&2
     exit 1
 fi
